@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ClipboardList, Download, Filter, FileSpreadsheet, Loader } from 'lucide-react';
-import { getAttendance, getStudents, getSummary } from '../api';
+import { getAttendance, getStudents, getSummary, getSettings } from '../api';
 import { exportExcel } from '../utils/exportExcel';
 import toast from 'react-hot-toast';
 
@@ -12,11 +12,15 @@ export default function RekapPage() {
   const [records, setRecords]     = useState([]);
   const [kelasList, setKelasList] = useState([]);
   const [exporting, setExporting] = useState(false);
+  const [settings, setSettings]   = useState({ jamTerlambat: '07:30', schoolName: 'AbsenSI' });
 
   useEffect(() => {
     getStudents().then(s => {
       setKelasList([...new Set(s.map(x => x.kelas).filter(Boolean))]);
     });
+    getSettings().then(s => {
+      if (s) setSettings(prev => ({ ...prev, ...s }));
+    }).catch(() => {});
   }, []);
 
   useEffect(() => { fetchData(); }, [date, kelas]);
@@ -30,12 +34,13 @@ export default function RekapPage() {
     setExporting(true);
     const tid = toast.loading('Menyiapkan file Excel...');
     try {
-      // Ambil semua rekap untuk sheet ke-2
-      const [summary, allRecords] = await Promise.all([
+      // Ambil semua rekap untuk sheet ke-2 beserta info sekolah
+      const [summary, allRecords, settings] = await Promise.all([
         getSummary(),
         getAttendance(), // semua tanggal, semua kelas
+        getSettings().catch(() => null),
       ]);
-      await exportExcel({ records, summary, allRecords, date, kelas });
+      await exportExcel({ records, summary, allRecords, date, kelas, settings });
       toast.success('✅ File Excel berhasil diunduh!', { id: tid });
     } catch (e) {
       console.error(e);
@@ -135,6 +140,7 @@ export default function RekapPage() {
                   <th>Nama Murid</th>
                   <th>NIS</th>
                   <th>Kelas</th>
+                  <th>Metode Verifikasi</th>
                   <th>Waktu</th>
                   <th>Confidence</th>
                   <th>Status</th>
@@ -152,6 +158,18 @@ export default function RekapPage() {
                     <td className="fw">{r.studentName}</td>
                     <td className="text-muted">{r.studentId}</td>
                     <td><span className="chip">{r.kelas || '—'}</span></td>
+                    <td>
+                      {r.method === 'rfid_face' || r.rfid ? (
+                        <div style={{display:'inline-flex', alignItems:'center', gap:5, background:'#ede9fe', color:'var(--primary)', padding:'3px 8px', borderRadius:'6px', fontSize:'0.75rem', fontWeight:600}}>
+                          <span>💳 RFID + Wajah</span>
+                          {r.rfid && <span style={{fontSize:'0.7rem', opacity:0.8}}>({r.rfid})</span>}
+                        </div>
+                      ) : (
+                        <div style={{display:'inline-flex', alignItems:'center', gap:5, background:'#f1f5f9', color:'var(--text2)', padding:'3px 8px', borderRadius:'6px', fontSize:'0.75rem', fontWeight:600}}>
+                          <span>📸 Hanya Wajah</span>
+                        </div>
+                      )}
+                    </td>
                     <td className="text-center">{r.time}</td>
                     <td className="text-center">
                       {r.confidence
@@ -161,7 +179,18 @@ export default function RekapPage() {
                         : <span className="text-muted">—</span>}
                     </td>
                     <td className="text-center">
-                      <span className="status-hadir">✅ Hadir</span>
+                      {(() => {
+                        const isLate = r.status === 'Terlambat' || ((r.time || '').replace('.', ':') > (settings.jamTerlambat || '07:30'));
+                        return isLate ? (
+                          <span style={{
+                            display:'inline-block', padding:'3px 10px', borderRadius:12,
+                            fontSize:'0.78rem', fontWeight:600,
+                            background:'rgba(245, 158, 11, 0.15)', color:'#d97706'
+                          }}>⚠️ Terlambat</span>
+                        ) : (
+                          <span className="status-hadir">✅ Tepat Waktu</span>
+                        );
+                      })()}
                     </td>
                   </tr>
                 ))}

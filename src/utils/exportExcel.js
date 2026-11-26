@@ -51,21 +51,23 @@ function addTitle(ws, totalCols, title, subtitle) {
 }
 
 // ─── SHEET 1: Kehadiran Harian ───────────────────────────────
-function buildSheetHarian(wb, records, date, kelas) {
+function buildSheetHarian(wb, records, date, kelas, settings) {
   const ws = wb.addWorksheet('Kehadiran Harian', {
     views: [{ state: 'frozen', ySplit: 5 }],
     pageSetup: { fitToPage: true, fitToWidth: 1, orientation: 'portrait' },
   });
 
   const cols = [
-    { key: 'no',      header: 'No.',        width: 5  },
-    { key: 'name',    header: 'Nama Murid', width: 28 },
-    { key: 'nis',     header: 'NIS',        width: 14 },
-    { key: 'kelas',   header: 'Kelas',      width: 10 },
-    { key: 'date',    header: 'Tanggal',    width: 14 },
-    { key: 'time',    header: 'Waktu Absen',width: 14 },
-    { key: 'conf',    header: 'Confidence', width: 14 },
-    { key: 'status',  header: 'Status',     width: 14 },
+    { key: 'no',      header: 'No.',           width: 5  },
+    { key: 'name',    header: 'Nama Murid',    width: 28 },
+    { key: 'nis',     header: 'NIS',           width: 14 },
+    { key: 'kelas',   header: 'Kelas',         width: 10 },
+    { key: 'metode',  header: 'Metode Absen',  width: 18 },
+    { key: 'rfid',    header: 'Kartu RFID',    width: 18 },
+    { key: 'date',    header: 'Tanggal',       width: 14 },
+    { key: 'time',    header: 'Waktu Absen',   width: 14 },
+    { key: 'conf',    header: 'Confidence',    width: 14 },
+    { key: 'status',  header: 'Status',        width: 14 },
   ];
   ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
 
@@ -73,7 +75,8 @@ function buildSheetHarian(wb, records, date, kelas) {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   });
   const kelasLabel = kelas ? `Kelas ${kelas}` : 'Semua Kelas';
-  addTitle(ws, cols.length, '📋 Laporan Kehadiran Murid', `${dateLabel} · ${kelasLabel} · AbsenSI`);
+  const schoolName = settings?.schoolName || 'AbsenSI';
+  addTitle(ws, cols.length, '📋 Laporan Kehadiran Murid', `${schoolName} · ${dateLabel} · ${kelasLabel}`);
 
   // ── Header kolom (baris 4) ──
   const hRow = ws.getRow(4);
@@ -92,16 +95,22 @@ function buildSheetHarian(wb, records, date, kelas) {
     const conf = r.confidence || null;
     const confLabel = conf ? `${conf}%` : '—';
     const confColor = conf >= 80 ? GREEN : conf >= 60 ? YELLOW : RED;
+    const isRfid = r.method === 'rfid_face' || r.rfid;
+    const jamTerlambat = settings?.jamTerlambat || '07:30';
+    const timeNorm = (r.time || '').replace('.', ':');
+    const isLate = r.status === 'Terlambat' || (timeNorm > jamTerlambat);
 
     const row = ws.addRow({
       no:     idx + 1,
       name:   r.studentName || '—',
       nis:    r.studentId   || '—',
       kelas:  r.kelas       || '—',
+      metode: isRfid ? '💳 RFID + Wajah' : '📸 Hanya Wajah',
+      rfid:   r.rfid        || '—',
       date:   r.date,
       time:   r.time,
       conf:   confLabel,
-      status: '✅ Hadir',
+      status: isLate ? '⚠️ Terlambat' : '✅ Tepat Waktu',
     });
     row.height = 22;
     const isEven = idx % 2 === 1;
@@ -136,7 +145,7 @@ function buildSheetHarian(wb, records, date, kelas) {
 }
 
 // ─── SHEET 2: Rekapitulasi Per Murid ─────────────────────────
-function buildSheetRekap(wb, summary, allRecords) {
+function buildSheetRekap(wb, summary, allRecords, settings) {
   const ws = wb.addWorksheet('Rekapitulasi Per Murid', {
     views: [{ state: 'frozen', ySplit: 5 }],
   });
@@ -154,7 +163,9 @@ function buildSheetRekap(wb, summary, allRecords) {
   ws.columns = cols.map(c => ({ key: c.key, width: c.width }));
 
   const now = new Date().toLocaleDateString('id-ID', { day:'numeric', month:'long', year:'numeric' });
-  addTitle(ws, cols.length, '📊 Rekapitulasi Kehadiran Per Murid', `Dicetak: ${now} · AbsenSI`);
+  const schoolName = settings?.schoolName || 'AbsenSI';
+  const ta = settings?.academicYear ? ` · TA ${settings.academicYear}` : '';
+  addTitle(ws, cols.length, '📊 Rekapitulasi Kehadiran Per Murid', `${schoolName}${ta} · Dicetak: ${now}`);
 
   // Header
   const hRow = ws.getRow(4);
@@ -217,15 +228,15 @@ function buildSheetRekap(wb, summary, allRecords) {
 }
 
 // ─── MAIN EXPORT FUNCTION ────────────────────────────────────
-export async function exportExcel({ records, summary, allRecords, date, kelas }) {
+export async function exportExcel({ records, summary, allRecords, date, kelas, settings }) {
   const wb = new ExcelJS.Workbook();
-  wb.creator  = 'AbsenSI';
+  wb.creator  = settings?.schoolName || 'AbsenSI';
   wb.created  = new Date();
   wb.modified = new Date();
   wb.properties.date1904 = false;
 
-  buildSheetHarian(wb, records, date, kelas);
-  buildSheetRekap(wb, summary, allRecords);
+  buildSheetHarian(wb, records, date, kelas, settings);
+  buildSheetRekap(wb, summary, allRecords, settings);
 
   // Generate buffer & download
   const buf = await wb.xlsx.writeBuffer();
